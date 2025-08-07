@@ -2,10 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
 const yaml = require('js-yaml');
-const glob = require('glob');
-const { promisify } = require('util');
-
-const globAsync = promisify(glob);
+const { glob } = require('glob');
 
 class OneDriveUploader {
   constructor(clientId, clientSecret, refreshToken) {
@@ -17,7 +14,7 @@ class OneDriveUploader {
 
   async authenticate() {
     try {
-      const response = await axios.post('https://login.microsoftonline.com/common/oauth2/v2.0/token', 
+      const response = await axios.post('https://login.microsoftonline.com/consumers/oauth2/v2.0/token', 
         new URLSearchParams({
           client_id: this.clientId,
           client_secret: this.clientSecret,
@@ -143,7 +140,7 @@ async function findMarkdownFiles(config) {
   
   // Find files matching include patterns
   for (const pattern of config.include_patterns) {
-    const files = await globAsync(pattern, { nodir: true });
+    const files = await glob(pattern, { nodir: true });
     allFiles.push(...files);
   }
   
@@ -153,7 +150,9 @@ async function findMarkdownFiles(config) {
   // Filter out excluded files
   const filteredFiles = uniqueFiles.filter(file => {
     return !config.exclude_patterns.some(excludePattern => {
-      return glob.minimatch(file, excludePattern);
+      // Use glob's minimatch function for pattern matching
+      const { minimatch } = require('minimatch');
+      return minimatch(file, excludePattern);
     });
   });
   
