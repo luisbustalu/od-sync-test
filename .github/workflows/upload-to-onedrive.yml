@@ -1,0 +1,94 @@
+name: Upload Markdown Files to OneDrive
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - '**/*.md'
+      - '**/*.markdown'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - '**/*.md'
+      - '**/*.markdown'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  upload-to-onedrive:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Fetch full history for accurate file detection
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: |
+        npm init -y
+        npm install axios js-yaml glob
+    
+    - name: Validate folder mapping
+      run: |
+        if [ ! -f "folder-mapping.yml" ]; then
+          echo "❌ folder-mapping.yml not found!"
+          echo "Please create a folder-mapping.yml file in the root of your repository."
+          exit 1
+        fi
+        echo "✅ folder-mapping.yml found"
+    
+    - name: Check for changed markdown files
+      id: changed-files
+      run: |
+        if [ "${{ github.event_name }}" = "push" ]; then
+          # For push events, check files changed in the last commit
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep -E '\.(md|markdown)$' || true)
+        elif [ "${{ github.event_name }}" = "pull_request" ]; then
+          # For PR events, check files changed compared to base branch
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep -E '\.(md|markdown)$' || true)
+        else
+          # For manual dispatch, upload all markdown files
+          CHANGED_FILES=$(find . -name "*.md" -o -name "*.markdown" | grep -v node_modules || true)
+        fi
+        
+        if [ -z "$CHANGED_FILES" ]; then
+          echo "No markdown files changed"
+          echo "skip=true" >> $GITHUB_OUTPUT
+        else
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          echo "skip=false" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Upload to OneDrive
+      if: steps.changed-files.outputs.skip == 'false'
+      env:
+        ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+        ONEDRIVE_CLIENT_SECRET: ${{ secrets.ONEDRIVE_CLIENT_SECRET }}
+        ONEDRIVE_REFRESH_TOKEN: ${{ secrets.ONEDRIVE_REFRESH_TOKEN }}
+      run: node upload-to-onedrive.js
+    
+    - name: Upload Summary
+      if: steps.changed-files.outputs.skip == 'false'
+      run: |
+        echo "## 📄 OneDrive Upload Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Markdown files have been successfully uploaded to OneDrive based on the folder mappings." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+    
+    - name: Notify if skipped
+      if: steps.changed-files.outputs.skip == 'true'
+      run: |
+        echo "## ℹ️ Upload Skipped" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "No markdown files were changed in this commit, so the OneDrive upload was skipped." >> $GITHUB_STEP_SUMMARY
