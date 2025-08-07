@@ -30,9 +30,7 @@ jobs:
         cache: 'npm'
     
     - name: Install dependencies
-      run: |
-        npm init -y
-        npm install axios js-yaml glob
+      run: npm ci
     
     - name: Validate folder mapping
       run: |

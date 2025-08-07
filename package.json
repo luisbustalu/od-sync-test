@@ -1,0 +1,17 @@
+{
+    "name": "onedrive-uploader",
+    "version": "1.0.0",
+    "description": "GitHub Action to upload markdown files to OneDrive",
+    "main": "upload-to-onedrive.js",
+    "scripts": {
+      "upload": "node upload-to-onedrive.js"
+    },
+    "dependencies": {
+      "axios": "^1.6.0",
+      "js-yaml": "^4.1.0",
+      "glob": "^10.3.0"
+    },
+    "keywords": ["onedrive", "github-action", "markdown"],
+    "author": "Your Name",
+    "license": "MIT"
+  }
