@@ -50,7 +50,20 @@ class OneDriveUploader {
     try {
       const fileContent = await fs.readFile(filePath);
       
-      // First, try to upload the file
+      // Check if file exists first (optional - for better logging)
+      let fileExists = false;
+      try {
+        const checkUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}:/${fileName}`;
+        await axios.get(checkUrl, {
+          headers: { 'Authorization': `Bearer ${this.accessToken}` }
+        });
+        fileExists = true;
+      } catch (error) {
+        // File doesn't exist (404) or other error - we'll create it
+        fileExists = false;
+      }
+      
+      // Upload the file (creates new or replaces existing)
       const uploadUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}:/${fileName}:/content`;
       
       const response = await axios.put(uploadUrl, fileContent, {
@@ -60,7 +73,8 @@ class OneDriveUploader {
         }
       });
 
-      console.log(`✅ Uploaded: ${fileName} to folder ${folderId}`);
+      const action = fileExists ? 'Updated' : 'Created';
+      console.log(`✅ ${action}: ${fileName} in folder ${folderId}`);
       return response.data;
     } catch (error) {
       if (error.response?.status === 401) {
@@ -108,7 +122,30 @@ class OneDriveUploader {
 async function loadFolderMapping() {
   try {
     const configFile = await fs.readFile('folder-mapping.yml', 'utf8');
-    return yaml.load(configFile);
+    const config = yaml.load(configFile);
+    
+    // Debug: log the loaded configuration
+    console.log('📋 Loaded configuration:');
+    console.log('   Mappings:', Object.keys(config.mappings || {}).length);
+    console.log('   Include patterns:', config.include_patterns);
+    console.log('   Exclude patterns:', config.exclude_patterns);
+    
+    // Validate configuration structure
+    if (!config.mappings) {
+      throw new Error('Configuration missing "mappings" section');
+    }
+    
+    if (!config.include_patterns) {
+      console.log('⚠️  No include_patterns found, using default: **/*.md');
+      config.include_patterns = ['**/*.md'];
+    }
+    
+    if (!config.exclude_patterns) {
+      console.log('ℹ️  No exclude_patterns found, using empty array');
+      config.exclude_patterns = [];
+    }
+    
+    return config;
   } catch (error) {
     console.error('❌ Failed to load folder mapping:', error.message);
     throw error;
@@ -138,23 +175,49 @@ function getFolderMapping(filePath, mappings) {
 async function findMarkdownFiles(config) {
   const allFiles = [];
   
+  // Ensure include_patterns is an array
+  const includePatterns = Array.isArray(config.include_patterns) 
+    ? config.include_patterns 
+    : [config.include_patterns || '**/*.md'];
+    
+  // Ensure exclude_patterns is an array
+  const excludePatterns = Array.isArray(config.exclude_patterns)
+    ? config.exclude_patterns
+    : (config.exclude_patterns ? [config.exclude_patterns] : []);
+  
+  console.log(`🔍 Include patterns: ${includePatterns.join(', ')}`);
+  console.log(`🚫 Exclude patterns: ${excludePatterns.join(', ')}`);
+  
   // Find files matching include patterns
-  for (const pattern of config.include_patterns) {
-    const files = await glob(pattern, { nodir: true });
-    allFiles.push(...files);
+  for (const pattern of includePatterns) {
+    try {
+      const files = await glob(pattern, { nodir: true });
+      console.log(`📁 Pattern "${pattern}" found ${files.length} files`);
+      allFiles.push(...files);
+    } catch (error) {
+      console.warn(`⚠️  Error with pattern "${pattern}":`, error.message);
+    }
   }
   
   // Remove duplicates
   const uniqueFiles = [...new Set(allFiles)];
+  console.log(`📄 Found ${uniqueFiles.length} unique files before filtering`);
   
   // Filter out excluded files
   const filteredFiles = uniqueFiles.filter(file => {
-    return !config.exclude_patterns.some(excludePattern => {
-      // Use glob's minimatch function for pattern matching
-      const { minimatch } = require('minimatch');
-      return minimatch(file, excludePattern);
+    return !excludePatterns.some(excludePattern => {
+      try {
+        // Use glob's minimatch function for pattern matching
+        const { minimatch } = require('minimatch');
+        return minimatch(file, excludePattern);
+      } catch (error) {
+        console.warn(`⚠️  Error matching exclude pattern "${excludePattern}":`, error.message);
+        return false;
+      }
     });
   });
+  
+  console.log(`✅ Final file count after exclusions: ${filteredFiles.length}`);
   
   return filteredFiles;
 }
