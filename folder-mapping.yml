@@ -1,6 +1,18 @@
 mappings:
   folder1: "C8270BC5EF28019!s67f7eb723fad4157baa9c74a2cddcb02"  # Replace with actual OneDrive folder ID
   folder2: "C8270BC5EF28019!s2fec41ad01d6405a8fb475eeb80eafd3"  # Replace with actual OneDrive folder ID
-  # Add more mappings as needed
 
-default_folder_id: "C8270BC5EF28019!s67f7eb723fad4157baa9c74a2cddcb02"  # Replace with default folder ID
+# File patterns to include (supports glob patterns)
+include_patterns:
+  - "**/*.md"
+  - "**/*.markdown"
+
+# File patterns to exclude (IMPORTANT: exclude dependencies and system files)
+exclude_patterns:
+  - "**/node_modules/**"
+  - "**/.git/**"
+  - "**/package-lock.json"
+  - "**/yarn.lock"
+  - "**/.github/**"
+  - "**/dist/**"
+  - "**/build/**"

@@ -135,6 +135,10 @@ async function loadFolderMapping() {
       throw new Error('Configuration missing "mappings" section');
     }
     
+    if (Object.keys(config.mappings).length === 0) {
+      throw new Error('No folder mappings defined in configuration');
+    }
+    
     if (!config.include_patterns) {
       console.log('⚠️  No include_patterns found, using default: **/*.md');
       config.include_patterns = ['**/*.md'];
@@ -165,11 +169,8 @@ function getFolderMapping(filePath, mappings) {
     };
   }
   
-  // Return default folder
-  return {
-    folderId: mappings.default_folder_id,
-    folderName: 'default'
-  };
+  // No mapping found - return null to indicate we should skip this file
+  return null;
 }
 
 async function findMarkdownFiles(config) {
@@ -254,10 +255,19 @@ async function main() {
     // Upload each file
     let successCount = 0;
     let errorCount = 0;
+    let skippedCount = 0;
     
     for (const filePath of markdownFiles) {
       try {
         const mapping = getFolderMapping(filePath, config);
+        
+        // Skip files that don't have a folder mapping
+        if (!mapping) {
+          console.log(`⏭️  Skipped: ${filePath} (no folder mapping found)`);
+          skippedCount++;
+          continue;
+        }
+        
         const fileName = path.basename(filePath);
         
         console.log(`📤 Uploading: ${filePath} → ${mapping.folderName}/${fileName}`);
@@ -272,6 +282,7 @@ async function main() {
     
     console.log(`\n📊 Upload Summary:`);
     console.log(`   ✅ Successful uploads: ${successCount}`);
+    console.log(`   ⏭️  Skipped files: ${skippedCount}`);
     console.log(`   ❌ Failed uploads: ${errorCount}`);
     console.log(`   📄 Total files processed: ${markdownFiles.length}`);
     
