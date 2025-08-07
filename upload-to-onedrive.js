@@ -3,6 +3,7 @@ const path = require('path');
 const axios = require('axios');
 const yaml = require('js-yaml');
 const { glob } = require('glob');
+const { execSync } = require('child_process');
 
 class OneDriveUploader {
   constructor(clientId, clientSecret, refreshToken) {
@@ -223,6 +224,103 @@ async function findMarkdownFiles(config) {
   return filteredFiles;
 }
 
+async function getChangedMarkdownFiles(config) {
+  // Check if we're running in GitHub Actions
+  if (!process.env.GITHUB_ACTIONS) {
+    console.log('ℹ️  Not running in GitHub Actions - processing all files');
+    return findMarkdownFiles(config);
+  }
+
+  const eventName = process.env.GITHUB_EVENT_NAME;
+  console.log(`🔍 GitHub event: ${eventName}`);
+
+  try {
+    let changedFiles = [];
+
+    if (eventName === 'push') {
+      // For push events, get files changed in the current commit
+      const gitCommand = 'git diff --name-only HEAD~1 HEAD';
+      const output = execSync(gitCommand, { encoding: 'utf8' });
+      changedFiles = output.trim().split('\n').filter(file => file);
+    } else if (eventName === 'pull_request') {
+      // For PR events, get files changed compared to base branch
+      const baseBranch = process.env.GITHUB_BASE_REF || 'main';
+      const gitCommand = `git diff --name-only origin/${baseBranch}...HEAD`;
+      const output = execSync(gitCommand, { encoding: 'utf8' });
+      changedFiles = output.trim().split('\n').filter(file => file);
+    } else if (eventName === 'workflow_dispatch') {
+      // For manual triggers, process all files
+      console.log('📋 Manual trigger - processing all markdown files');
+      return findMarkdownFiles(config);
+    } else {
+      console.log(`⚠️  Unknown event type: ${eventName} - processing all files`);
+      return findMarkdownFiles(config);
+    }
+
+    console.log(`📝 Found ${changedFiles.length} changed files from git`);
+    
+    if (changedFiles.length === 0) {
+      console.log('ℹ️  No files changed');
+      return [];
+    }
+
+    // Filter to only include markdown files
+    const markdownExtensions = ['.md', '.markdown'];
+    const changedMarkdownFiles = changedFiles.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return markdownExtensions.includes(ext);
+    });
+
+    console.log(`📄 Found ${changedMarkdownFiles.length} changed markdown files`);
+
+    if (changedMarkdownFiles.length === 0) {
+      return [];
+    }
+
+    // Apply include/exclude patterns to the changed files
+    const includePatterns = Array.isArray(config.include_patterns) 
+      ? config.include_patterns 
+      : [config.include_patterns || '**/*.md'];
+      
+    const excludePatterns = Array.isArray(config.exclude_patterns)
+      ? config.exclude_patterns
+      : (config.exclude_patterns ? [config.exclude_patterns] : []);
+
+    console.log(`🔍 Applying include patterns: ${includePatterns.join(', ')}`);
+    console.log(`🚫 Applying exclude patterns: ${excludePatterns.join(', ')}`);
+
+    // Filter changed files through include/exclude patterns
+    const { minimatch } = require('minimatch');
+    const filteredFiles = changedMarkdownFiles.filter(file => {
+      // Check if file matches any include pattern
+      const matchesInclude = includePatterns.some(pattern => minimatch(file, pattern));
+      if (!matchesInclude) {
+        console.log(`⏭️  Skipping ${file} (doesn't match include patterns)`);
+        return false;
+      }
+
+      // Check if file matches any exclude pattern
+      const matchesExclude = excludePatterns.some(pattern => minimatch(file, pattern));
+      if (matchesExclude) {
+        console.log(`⏭️  Skipping ${file} (matches exclude pattern)`);
+        return false;
+      }
+
+      return true;
+    });
+
+    console.log(`✅ Final changed markdown files to process: ${filteredFiles.length}`);
+    filteredFiles.forEach(file => console.log(`   📄 ${file}`));
+
+    return filteredFiles;
+
+  } catch (error) {
+    console.error('❌ Error getting changed files:', error.message);
+    console.log('📋 Falling back to processing all markdown files');
+    return findMarkdownFiles(config);
+  }
+}
+
 async function main() {
   try {
     // Get environment variables
@@ -243,12 +341,12 @@ async function main() {
     // Initialize uploader
     const uploader = new OneDriveUploader(clientId, clientSecret, refreshToken);
     
-    // Find all markdown files
-    const markdownFiles = await findMarkdownFiles(config);
+    // Find changed markdown files (or all if not in GitHub Actions)
+    const markdownFiles = await getChangedMarkdownFiles(config);
     console.log(`📄 Found ${markdownFiles.length} markdown files to upload`);
     
     if (markdownFiles.length === 0) {
-      console.log('ℹ️ No markdown files found to upload');
+      console.log('ℹ️ No markdown files to upload');
       return;
     }
     
