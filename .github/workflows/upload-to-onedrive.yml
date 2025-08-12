@@ -29,7 +29,7 @@ jobs:
     - name: Install pandoc and LaTeX
       run: |
         sudo apt-get update
-        sudo apt-get install -y pandoc texlive-latex-base texlive-latex-extra texlive-latex-recommended texlive-fonts-recommended texlive-fonts-extra texlive-lang-english lualatex
+        sudo apt-get install -y pandoc texlive-latex-base texlive-latex-extra texlive-latex-recommended texlive-fonts-recommended texlive-fonts-extra texlive-lang-english texlive-luatex
     
     - name: Validate folder mapping
       run: |
