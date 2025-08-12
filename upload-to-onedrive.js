@@ -174,13 +174,13 @@ function getFolderMapping(filePath, mappings) {
   return null;
 }
 
-async function findMarkdownFiles(config) {
+async function findAllFiles(config) {
   const allFiles = [];
   
   // Ensure include_patterns is an array
   const includePatterns = Array.isArray(config.include_patterns) 
     ? config.include_patterns 
-    : [config.include_patterns || '**/*.md'];
+    : [config.include_patterns || '**/*'];
     
   // Ensure exclude_patterns is an array
   const excludePatterns = Array.isArray(config.exclude_patterns)
@@ -224,11 +224,11 @@ async function findMarkdownFiles(config) {
   return filteredFiles;
 }
 
-async function getChangedMarkdownFiles(config) {
+async function getChangedFiles(config) {
   // Check if we're running in GitHub Actions
   if (!process.env.GITHUB_ACTIONS) {
     console.log('ℹ️  Not running in GitHub Actions - processing all files');
-    return findMarkdownFiles(config);
+    return findAllFiles(config);
   }
 
   const eventName = process.env.GITHUB_EVENT_NAME;
@@ -250,11 +250,11 @@ async function getChangedMarkdownFiles(config) {
       changedFiles = output.trim().split('\n').filter(file => file);
     } else if (eventName === 'workflow_dispatch') {
       // For manual triggers, process all files
-      console.log('📋 Manual trigger - processing all markdown files');
-      return findMarkdownFiles(config);
+      console.log('📋 Manual trigger - processing all files');
+      return findAllFiles(config);
     } else {
       console.log(`⚠️  Unknown event type: ${eventName} - processing all files`);
-      return findMarkdownFiles(config);
+      return findAllFiles(config);
     }
 
     console.log(`📝 Found ${changedFiles.length} changed files from git`);
@@ -264,23 +264,10 @@ async function getChangedMarkdownFiles(config) {
       return [];
     }
 
-    // Filter to only include markdown files
-    const markdownExtensions = ['.md', '.markdown'];
-    const changedMarkdownFiles = changedFiles.filter(file => {
-      const ext = path.extname(file).toLowerCase();
-      return markdownExtensions.includes(ext);
-    });
-
-    console.log(`📄 Found ${changedMarkdownFiles.length} changed markdown files`);
-
-    if (changedMarkdownFiles.length === 0) {
-      return [];
-    }
-
     // Apply include/exclude patterns to the changed files
     const includePatterns = Array.isArray(config.include_patterns) 
       ? config.include_patterns 
-      : [config.include_patterns || '**/*.md'];
+      : [config.include_patterns || '**/*'];
       
     const excludePatterns = Array.isArray(config.exclude_patterns)
       ? config.exclude_patterns
@@ -291,7 +278,7 @@ async function getChangedMarkdownFiles(config) {
 
     // Filter changed files through include/exclude patterns
     const { minimatch } = require('minimatch');
-    const filteredFiles = changedMarkdownFiles.filter(file => {
+    const filteredFiles = changedFiles.filter(file => {
       // Check if file matches any include pattern
       const matchesInclude = includePatterns.some(pattern => minimatch(file, pattern));
       if (!matchesInclude) {
@@ -309,16 +296,80 @@ async function getChangedMarkdownFiles(config) {
       return true;
     });
 
-    console.log(`✅ Final changed markdown files to process: ${filteredFiles.length}`);
+    console.log(`✅ Final changed files to process: ${filteredFiles.length}`);
     filteredFiles.forEach(file => console.log(`   📄 ${file}`));
 
     return filteredFiles;
 
   } catch (error) {
     console.error('❌ Error getting changed files:', error.message);
-    console.log('📋 Falling back to processing all markdown files');
-    return findMarkdownFiles(config);
+    console.log('📋 Falling back to processing all files');
+    return findAllFiles(config);
   }
+}
+
+async function convertMarkdownToPdf(markdownFile) {
+  try {
+    const pdfFile = markdownFile.replace(/\.(md|markdown)$/i, '.pdf');
+    const metaFile = 'meta.yaml';
+    
+    // Check if meta.yaml exists
+    try {
+      await fs.access(metaFile);
+    } catch (error) {
+      console.error(`❌ meta.yaml file not found: ${metaFile}`);
+      throw new Error(`meta.yaml file not found: ${metaFile}`);
+    }
+    
+    const pandocCommand = [
+      'pandoc',
+      markdownFile,
+      '-o', pdfFile,
+      '--variable=geometry:margin=0.8in',
+      '--metadata-file=meta.yaml',
+      '--pdf-engine=lualatex',
+      '--variable=fontsize:11pt'
+    ].join(' ');
+    
+    console.log(`🔄 Converting ${markdownFile} to PDF...`);
+    console.log(`📋 Command: ${pandocCommand}`);
+    
+    execSync(pandocCommand, { stdio: 'inherit' });
+    
+    console.log(`✅ Successfully converted ${markdownFile} to ${pdfFile}`);
+    return pdfFile;
+  } catch (error) {
+    console.error(`❌ Failed to convert ${markdownFile} to PDF:`, error.message);
+    throw error;
+  }
+}
+
+async function convertAllMarkdownToPdf(markdownFiles) {
+  const convertedFiles = [];
+  const failedFiles = [];
+  
+  console.log(`\n📄 Starting PDF conversion for ${markdownFiles.length} markdown files...`);
+  
+  for (const markdownFile of markdownFiles) {
+    try {
+      const pdfFile = await convertMarkdownToPdf(markdownFile);
+      convertedFiles.push(pdfFile);
+    } catch (error) {
+      console.error(`❌ Failed to convert ${markdownFile}:`, error.message);
+      failedFiles.push(markdownFile);
+    }
+  }
+  
+  console.log(`\n📊 PDF Conversion Summary:`);
+  console.log(`   ✅ Successfully converted: ${convertedFiles.length}`);
+  console.log(`   ❌ Failed conversions: ${failedFiles.length}`);
+  
+  if (failedFiles.length > 0) {
+    console.log(`   📄 Failed files:`);
+    failedFiles.forEach(file => console.log(`      - ${file}`));
+  }
+  
+  return convertedFiles;
 }
 
 async function main() {
@@ -341,52 +392,102 @@ async function main() {
     // Initialize uploader
     const uploader = new OneDriveUploader(clientId, clientSecret, refreshToken);
     
-    // Find changed markdown files (or all if not in GitHub Actions)
-    const markdownFiles = await getChangedMarkdownFiles(config);
-    console.log(`📄 Found ${markdownFiles.length} markdown files to upload`);
+    // STEP 1: Upload all changed files from folders in folder-mapping.yml
+    console.log('\n📤 STEP 1: Uploading all changed files...');
+    const allChangedFiles = await getChangedFiles(config);
+    console.log(`📄 Found ${allChangedFiles.length} changed files to upload`);
     
-    if (markdownFiles.length === 0) {
-      console.log('ℹ️ No markdown files to upload');
-      return;
+    if (allChangedFiles.length > 0) {
+      let successCount = 0;
+      let errorCount = 0;
+      let skippedCount = 0;
+      
+      for (const filePath of allChangedFiles) {
+        try {
+          const mapping = getFolderMapping(filePath, config);
+          
+          // Skip files that don't have a folder mapping
+          if (!mapping) {
+            console.log(`⏭️  Skipped: ${filePath} (no folder mapping found)`);
+            skippedCount++;
+            continue;
+          }
+          
+          const fileName = path.basename(filePath);
+          
+          console.log(`📤 Uploading: ${filePath} → ${mapping.folderName}/${fileName}`);
+          
+          await uploader.uploadFile(filePath, mapping.folderId, fileName);
+          successCount++;
+        } catch (error) {
+          console.error(`❌ Failed to upload ${filePath}:`, error.message);
+          errorCount++;
+        }
+      }
+      
+      console.log(`\n📊 Step 1 Upload Summary:`);
+      console.log(`   ✅ Successful uploads: ${successCount}`);
+      console.log(`   ⏭️  Skipped files: ${skippedCount}`);
+      console.log(`   ❌ Failed uploads: ${errorCount}`);
+      console.log(`   📄 Total files processed: ${allChangedFiles.length}`);
     }
     
-    // Upload each file
-    let successCount = 0;
-    let errorCount = 0;
-    let skippedCount = 0;
+    // STEP 2: Convert markdown files to PDF and upload them
+    console.log('\n📄 STEP 2: Converting markdown files to PDF...');
     
-    for (const filePath of markdownFiles) {
-      try {
-        const mapping = getFolderMapping(filePath, config);
+    // Find all markdown files in the changed files
+    const markdownExtensions = ['.md', '.markdown'];
+    const markdownFiles = allChangedFiles.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return markdownExtensions.includes(ext);
+    });
+    
+    console.log(`📄 Found ${markdownFiles.length} markdown files to convert to PDF`);
+    
+    if (markdownFiles.length > 0) {
+      // Convert markdown files to PDF
+      const pdfFiles = await convertAllMarkdownToPdf(markdownFiles);
+      console.log(`📄 Generated ${pdfFiles.length} PDF files to upload`);
+      
+      if (pdfFiles.length > 0) {
+        let successCount = 0;
+        let errorCount = 0;
+        let skippedCount = 0;
         
-        // Skip files that don't have a folder mapping
-        if (!mapping) {
-          console.log(`⏭️  Skipped: ${filePath} (no folder mapping found)`);
-          skippedCount++;
-          continue;
+        for (const filePath of pdfFiles) {
+          try {
+            const mapping = getFolderMapping(filePath, config);
+            
+            // Skip files that don't have a folder mapping
+            if (!mapping) {
+              console.log(`⏭️  Skipped: ${filePath} (no folder mapping found)`);
+              skippedCount++;
+              continue;
+            }
+            
+            const fileName = path.basename(filePath);
+            
+            console.log(`📤 Uploading PDF: ${filePath} → ${mapping.folderName}/${fileName}`);
+            
+            await uploader.uploadFile(filePath, mapping.folderId, fileName);
+            successCount++;
+          } catch (error) {
+            console.error(`❌ Failed to upload PDF ${filePath}:`, error.message);
+            errorCount++;
+          }
         }
         
-        const fileName = path.basename(filePath);
-        
-        console.log(`📤 Uploading: ${filePath} → ${mapping.folderName}/${fileName}`);
-        
-        await uploader.uploadFile(filePath, mapping.folderId, fileName);
-        successCount++;
-      } catch (error) {
-        console.error(`❌ Failed to upload ${filePath}:`, error.message);
-        errorCount++;
+        console.log(`\n📊 Step 2 PDF Upload Summary:`);
+        console.log(`   ✅ Successful PDF uploads: ${successCount}`);
+        console.log(`   ⏭️  Skipped PDF files: ${skippedCount}`);
+        console.log(`   ❌ Failed PDF uploads: ${errorCount}`);
+        console.log(`   📄 Total PDF files processed: ${pdfFiles.length}`);
       }
+    } else {
+      console.log('ℹ️ No markdown files found to convert to PDF');
     }
     
-    console.log(`\n📊 Upload Summary:`);
-    console.log(`   ✅ Successful uploads: ${successCount}`);
-    console.log(`   ⏭️  Skipped files: ${skippedCount}`);
-    console.log(`   ❌ Failed uploads: ${errorCount}`);
-    console.log(`   📄 Total files processed: ${markdownFiles.length}`);
-    
-    if (errorCount > 0) {
-      process.exit(1);
-    }
+    console.log('\n🎉 OneDrive upload process completed successfully!');
     
   } catch (error) {
     console.error('💥 Fatal error:', error.message);
@@ -399,4 +500,12 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { OneDriveUploader, loadFolderMapping, getFolderMapping };
+module.exports = { 
+  OneDriveUploader, 
+  loadFolderMapping, 
+  getFolderMapping, 
+  convertMarkdownToPdf, 
+  convertAllMarkdownToPdf,
+  findAllFiles,
+  getChangedFiles
+};

@@ -1,0 +1,19 @@
+mainfont: "Gentium Book Plus"
+mainfontfallback:
+  - "TeXGyreDejaVuMath-Regular:mode=harf"
+  - "Noto Color Emoji:mode=harf"
+  - "Droid Sans Fallback:mode=harf"
+header-includes: |
+  \usepackage{graphicx}
+  \usepackage{fancyhdr}
+  \fancypagestyle{firstpage}{
+    \fancyhf{}
+    \fancyhead[R]{\includegraphics[height=2cm]{logo}}
+    \renewcommand{\headrulewidth}{0pt}
+  }
+  \fancypagestyle{otherpage}{
+    \fancyhf{}
+    \renewcommand{\headrulewidth}{0pt}
+  }
+  \pagestyle{otherpage}
+  \thispagestyle{firstpage} 

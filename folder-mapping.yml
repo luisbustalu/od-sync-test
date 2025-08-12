@@ -4,8 +4,7 @@ mappings:
 
 # File patterns to include (supports glob patterns)
 include_patterns:
-  - "**/*.md"
-  - "**/*.markdown"
+  - "**/*"
 
 # File patterns to exclude (IMPORTANT: exclude dependencies and system files)
 exclude_patterns:

@@ -1,16 +1,10 @@
-name: Upload Markdown Files to OneDrive
+name: Upload Files to OneDrive and Convert Markdown to PDF
 
 on:
   push:
     branches: [ main, master ]
-    paths:
-      - '**/*.md'
-      - '**/*.markdown'
   pull_request:
     branches: [ main, master ]
-    paths:
-      - '**/*.md'
-      - '**/*.markdown'
   workflow_dispatch: # Allow manual triggering
 
 jobs:
@@ -32,6 +26,11 @@ jobs:
     - name: Install dependencies
       run: npm ci
     
+    - name: Install pandoc and LaTeX
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pandoc texlive-latex-base texlive-latex-extra texlive-latex-recommended texlive-fonts-recommended texlive-fonts-extra texlive-lang-english lualatex
+    
     - name: Validate folder mapping
       run: |
         if [ ! -f "folder-mapping.yml" ]; then
@@ -41,22 +40,22 @@ jobs:
         fi
         echo "✅ folder-mapping.yml found"
     
-    - name: Check for changed markdown files
+    - name: Check for changed files
       id: changed-files
       run: |
         if [ "${{ github.event_name }}" = "push" ]; then
           # For push events, check files changed in the last commit
-          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep -E '\.(md|markdown)$' || true)
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || true)
         elif [ "${{ github.event_name }}" = "pull_request" ]; then
           # For PR events, check files changed compared to base branch
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep -E '\.(md|markdown)$' || true)
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD || true)
         else
-          # For manual dispatch, upload all markdown files
-          CHANGED_FILES=$(find . -name "*.md" -o -name "*.markdown" | grep -v node_modules || true)
+          # For manual dispatch, upload all files
+          CHANGED_FILES=$(find . -type f | grep -v node_modules | grep -v .git || true)
         fi
         
         if [ -z "$CHANGED_FILES" ]; then
-          echo "No markdown files changed"
+          echo "No files changed"
           echo "skip=true" >> $GITHUB_OUTPUT
         else
           echo "Changed files:"
@@ -77,7 +76,8 @@ jobs:
       run: |
         echo "## 📄 OneDrive Upload Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "Markdown files have been successfully uploaded to OneDrive based on the folder mappings." >> $GITHUB_STEP_SUMMARY
+        echo "Files have been successfully uploaded to OneDrive based on the folder mappings." >> $GITHUB_STEP_SUMMARY
+        echo "Markdown files have also been converted to PDF and uploaded." >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Configuration" >> $GITHUB_STEP_SUMMARY
         echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
@@ -89,4 +89,4 @@ jobs:
       run: |
         echo "## ℹ️ Upload Skipped" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "No markdown files were changed in this commit, so the OneDrive upload was skipped." >> $GITHUB_STEP_SUMMARY
+        echo "No files were changed in this commit, so the OneDrive upload was skipped." >> $GITHUB_STEP_SUMMARY
