@@ -1,6 +1,7 @@
 mappings:
   folder1: "C8270BC5EF28019!s67f7eb723fad4157baa9c74a2cddcb02"  # Replace with actual OneDrive folder ID
   folder2: "C8270BC5EF28019!s2fec41ad01d6405a8fb475eeb80eafd3"  # Replace with actual OneDrive folder ID
+  "folder1/subfolder": "C8270BC5EF28019!s2fec41ad01d6405a8fb475eeb80eafd3"  # Example subfolder mapping
 
 # File patterns to include (supports glob patterns)
 include_patterns:

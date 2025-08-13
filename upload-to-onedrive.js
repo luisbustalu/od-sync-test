@@ -158,20 +158,34 @@ async function loadFolderMapping() {
 }
 
 function getFolderMapping(filePath, mappings) {
-  // Extract the first directory from the file path
-  const pathParts = filePath.split(path.sep);
-  const firstDir = pathParts[0];
+  // Convert file path to use forward slashes for consistency
+  const normalizedPath = filePath.replace(/\\/g, '/');
   
-  // Check if there's a mapping for this folder
-  if (mappings.mappings[firstDir]) {
-    return {
-      folderId: mappings.mappings[firstDir],
-      folderName: firstDir
-    };
+  // Extract path parts
+  const pathParts = normalizedPath.split('/');
+  
+  // Try to find the longest matching path (most specific match first)
+  let bestMatch = null;
+  let bestMatchLength = 0;
+  
+  for (const mappingPath of Object.keys(mappings.mappings)) {
+    const mappingParts = mappingPath.split('/');
+    
+    // Check if the file path starts with this mapping path
+    if (pathParts.length >= mappingParts.length) {
+      const isMatch = mappingParts.every((part, index) => pathParts[index] === part);
+      
+      if (isMatch && mappingParts.length > bestMatchLength) {
+        bestMatch = {
+          folderId: mappings.mappings[mappingPath],
+          folderName: mappingPath
+        };
+        bestMatchLength = mappingParts.length;
+      }
+    }
   }
   
-  // No mapping found - return null to indicate we should skip this file
-  return null;
+  return bestMatch;
 }
 
 async function findAllFiles(config) {

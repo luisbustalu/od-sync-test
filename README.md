@@ -21,6 +21,7 @@ This GitHub Action automatically uploads changed files to OneDrive and converts 
 mappings:
   folder1: "your-onedrive-folder-id-1"
   folder2: "your-onedrive-folder-id-2"
+  "folder1/subfolder": "your-onedrive-folder-id-3"  # Subfolder mapping example
 
 # File patterns to include (supports glob patterns)
 include_patterns:
@@ -36,6 +37,14 @@ exclude_patterns:
   - "**/dist/**"
   - "**/build/**"
 ```
+
+**Folder Mapping Rules:**
+- Use forward slashes (`/`) as path separators
+- The most specific (longest) matching path takes precedence
+- Examples:
+  - `folder1/file.md` → Maps to `folder1` OneDrive folder
+  - `folder1/subfolder/file.md` → Maps to `folder1/subfolder` OneDrive folder (if configured)
+  - `folder2/file.md` → Maps to `folder2` OneDrive folder
 
 ### meta.yaml
 Contains pandoc metadata for PDF styling:
