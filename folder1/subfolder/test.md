@@ -10,6 +10,6 @@ This is a test file to demonstrate that the subfolder mapping functionality work
 
 ## Example
 
-- `folder1/file.md` → Maps to `folder1` OneDrive folder
+- `folder1/file.md` → Maps to `folder1` OneDrive folder!!
 - `folder1/subfolder/file.md` → Maps to `folder1/subfolder` OneDrive folder (if configured)
 - `folder2/file.md` → Maps to `folder2` OneDrive folder 
