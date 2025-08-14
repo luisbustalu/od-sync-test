@@ -17,20 +17,6 @@ jobs:
       with:
         fetch-depth: 0 # Fetch full history for accurate file detection
     
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-    
-    - name: Install dependencies
-      run: npm ci
-    
-    - name: Install pandoc and LaTeX
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y pandoc texlive-latex-base texlive-latex-extra texlive-latex-recommended texlive-fonts-recommended texlive-fonts-extra texlive-lang-english texlive-luatex
-    
     - name: Validate folder mapping
       run: |
         if [ ! -f "folder-mapping.yml" ]; then
@@ -80,6 +66,23 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
         fi
+    
+    - name: Setup Node.js
+      if: steps.changed-files.outputs.skip == 'false'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      if: steps.changed-files.outputs.skip == 'false'
+      run: npm ci
+    
+    - name: Install pandoc and LaTeX
+      if: steps.changed-files.outputs.skip == 'false'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pandoc texlive-latex-base texlive-latex-extra texlive-latex-recommended texlive-fonts-recommended texlive-fonts-extra texlive-lang-english texlive-luatex
     
     - name: Upload to OneDrive
       if: steps.changed-files.outputs.skip == 'false'
