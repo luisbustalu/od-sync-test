@@ -29,10 +29,36 @@ jobs:
     - name: Extract mapped folders
       id: mapped-folders
       run: |
-        # Extract folder names from folder-mapping.yml (keys under mappings)
-        MAPPED_FOLDERS=$(grep "^  [^#]" folder-mapping.yml | grep -v "include_patterns\|exclude_patterns" | sed 's/^  \([^:]*\):.*/\1/' | tr '\n' '|' | sed 's/|$//')
-        echo "Mapped folders: $MAPPED_FOLDERS"
-        echo "mapped-folders=$MAPPED_FOLDERS" >> $GITHUB_OUTPUT
+        # Use Python to properly parse YAML and extract folder names
+        python3 -c "
+        import yaml
+        import re
+        import sys
+        
+        try:
+            with open('folder-mapping.yml', 'r') as f:
+                config = yaml.safe_load(f)
+            
+            if 'mappings' in config:
+                folders = list(config['mappings'].keys())
+                # Escape special regex characters for each folder name
+                escaped_folders = []
+                for folder in folders:
+                    # Escape regex special characters
+                    escaped = re.escape(folder)
+                    escaped_folders.append(escaped)
+                
+                # Join with | for regex alternation
+                result = '|'.join(escaped_folders)
+                print(f'Mapped folders: {result}')
+                print(f'mapped-folders={result}')
+            else:
+                print('No mappings found in folder-mapping.yml')
+                sys.exit(1)
+        except Exception as e:
+            print(f'Error parsing folder-mapping.yml: {e}')
+            sys.exit(1)
+        " >> $GITHUB_OUTPUT
     
     - name: Check for changed files in mapped folders
       id: changed-files
