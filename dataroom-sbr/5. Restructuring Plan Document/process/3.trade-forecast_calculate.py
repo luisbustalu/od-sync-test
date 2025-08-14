@@ -1825,7 +1825,7 @@ if __name__ == "__main__":
     print()
     
     # Use baseline admission fee (no increases) - this gives realistic 5.6% margin
-    baseline_admission_fee = 4.70
+    baseline_admission_fee = 4.75
     generator = TradeForecastGenerator(admission_fee_december_onwards=baseline_admission_fee)
     
     # Verify the margin

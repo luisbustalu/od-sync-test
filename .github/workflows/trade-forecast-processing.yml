@@ -90,7 +90,7 @@ jobs:
       working-directory: dataroom-sbr/5. Restructuring Plan Document/process
       run: |
         echo "Generating trade forecast method PDF..."
-        cat 1.trade-forecast_narrative.md 2.trade-forecast_method.md | pandoc --metadata-file=../../emoji.yaml --toc --pdf-engine=lualatex -o trade-forecast_method.pdf
+        cat 1.trade-forecast_narrative.md 2.trade-forecast_method.md | pandoc --metadata-file=../../../emoji.yaml --toc --pdf-engine=lualatex -o trade-forecast_method.pdf
         echo "✅ PDF generated: trade-forecast_method.pdf"
     
     - name: Run trade forecast calculation
