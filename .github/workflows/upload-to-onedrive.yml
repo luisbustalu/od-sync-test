@@ -40,7 +40,15 @@ jobs:
         fi
         echo "✅ folder-mapping.yml found"
     
-    - name: Check for changed files
+    - name: Extract mapped folders
+      id: mapped-folders
+      run: |
+        # Extract folder names from folder-mapping.yml (keys under mappings)
+        MAPPED_FOLDERS=$(grep "^  [^#]" folder-mapping.yml | grep -v "include_patterns\|exclude_patterns" | sed 's/^  \([^:]*\):.*/\1/' | tr '\n' '|' | sed 's/|$//')
+        echo "Mapped folders: $MAPPED_FOLDERS"
+        echo "mapped-folders=$MAPPED_FOLDERS" >> $GITHUB_OUTPUT
+    
+    - name: Check for changed files in mapped folders
       id: changed-files
       run: |
         if [ "${{ github.event_name }}" = "push" ]; then
@@ -50,17 +58,27 @@ jobs:
           # For PR events, check files changed compared to base branch
           CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD || true)
         else
-          # For manual dispatch, upload all files
-          CHANGED_FILES=$(find . -type f | grep -v node_modules | grep -v .git || true)
+          # For manual dispatch, upload all files in mapped folders
+          MAPPED_FOLDERS="${{ steps.mapped-folders.outputs.mapped-folders }}"
+          CHANGED_FILES=$(find . -type f | grep -E "^\./($MAPPED_FOLDERS)/" | grep -v node_modules | grep -v .git || true)
         fi
         
         if [ -z "$CHANGED_FILES" ]; then
-          echo "No files changed"
+          echo "No files changed in mapped folders"
           echo "skip=true" >> $GITHUB_OUTPUT
         else
-          echo "Changed files:"
-          echo "$CHANGED_FILES"
-          echo "skip=false" >> $GITHUB_OUTPUT
+          # Filter to only include files in mapped folders
+          MAPPED_FOLDERS="${{ steps.mapped-folders.outputs.mapped-folders }}"
+          FILTERED_FILES=$(echo "$CHANGED_FILES" | grep -E "^($MAPPED_FOLDERS)/" || true)
+          
+          if [ -z "$FILTERED_FILES" ]; then
+            echo "No files changed in mapped folders"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Changed files in mapped folders:"
+            echo "$FILTERED_FILES"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
         fi
     
     - name: Upload to OneDrive
@@ -76,17 +94,20 @@ jobs:
       run: |
         echo "## 📄 OneDrive Upload Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "Files have been successfully uploaded to OneDrive based on the folder mappings." >> $GITHUB_STEP_SUMMARY
+        echo "Files in mapped folders have been successfully uploaded to OneDrive based on the folder mappings." >> $GITHUB_STEP_SUMMARY
         echo "Markdown files have also been converted to PDF and uploaded." >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Configuration" >> $GITHUB_STEP_SUMMARY
         echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Mapped Folders**: ${{ steps.mapped-folders.outputs.mapped-folders }}" >> $GITHUB_STEP_SUMMARY
     
     - name: Notify if skipped
       if: steps.changed-files.outputs.skip == 'true'
       run: |
         echo "## ℹ️ Upload Skipped" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "No files were changed in this commit, so the OneDrive upload was skipped." >> $GITHUB_STEP_SUMMARY
+        echo "No files were changed in mapped folders, so the OneDrive upload was skipped." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Mapped folders**: ${{ steps.mapped-folders.outputs.mapped-folders }}" >> $GITHUB_STEP_SUMMARY
