@@ -30,7 +30,7 @@ jobs:
       id: mapped-folders
       run: |
         # Use Python to properly parse YAML and extract folder names
-        python3 -c "
+        MAPPED_FOLDERS=$(python3 -c "
         import yaml
         import re
         import sys
@@ -50,15 +50,17 @@ jobs:
                 
                 # Join with | for regex alternation
                 result = '|'.join(escaped_folders)
-                print(f'Mapped folders: {result}')
-                print(f'mapped-folders={result}')
+                print(result)
             else:
-                print('No mappings found in folder-mapping.yml')
+                print('No mappings found in folder-mapping.yml', file=sys.stderr)
                 sys.exit(1)
         except Exception as e:
-            print(f'Error parsing folder-mapping.yml: {e}')
+            print(f'Error parsing folder-mapping.yml: {e}', file=sys.stderr)
             sys.exit(1)
-        " >> $GITHUB_OUTPUT
+        ")
+        
+        echo "Mapped folders: $MAPPED_FOLDERS"
+        echo "mapped-folders=$MAPPED_FOLDERS" >> $GITHUB_OUTPUT
     
     - name: Check for changed files in mapped folders
       id: changed-files
