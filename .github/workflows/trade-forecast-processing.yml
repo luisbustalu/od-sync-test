@@ -1,0 +1,314 @@
+name: Trade Forecast Processing and OneDrive Upload
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'dataroom-sbr/5. Restructuring Plan Document/process/1.trade-forecast_narrative.md'
+      - 'dataroom-sbr/5. Restructuring Plan Document/process/2.trade-forecast_method.md'
+      - 'dataroom-sbr/5. Restructuring Plan Document/process/3.trade-forecast_calculate.py'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'dataroom-sbr/5. Restructuring Plan Document/process/1.trade-forecast_narrative.md'
+      - 'dataroom-sbr/5. Restructuring Plan Document/process/2.trade-forecast_method.md'
+      - 'dataroom-sbr/5. Restructuring Plan Document/process/3.trade-forecast_calculate.py'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  process-trade-forecast:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Fetch full history for accurate file detection
+    
+    - name: Check for changed files
+      id: changed-files
+      run: |
+        if [ "${{ github.event_name }}" = "push" ]; then
+          # For push events, check files changed in the last commit
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || true)
+        elif [ "${{ github.event_name }}" = "pull_request" ]; then
+          # For PR events, check files changed compared to base branch
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD || true)
+        else
+          # For manual dispatch, check all trade forecast files
+          CHANGED_FILES="dataroom-sbr/5. Restructuring Plan Document/process/1.trade-forecast_narrative.md dataroom-sbr/5. Restructuring Plan Document/process/2.trade-forecast_method.md dataroom-sbr/5. Restructuring Plan Document/process/3.trade-forecast_calculate.py"
+        fi
+        
+        echo "Changed files: $CHANGED_FILES"
+        
+        # Check for narrative and method files
+        if echo "$CHANGED_FILES" | grep -q "1.trade-forecast_narrative.md\|2.trade-forecast_method.md"; then
+          echo "narrative-method-changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "narrative-method-changed=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Check for calculation file
+        if echo "$CHANGED_FILES" | grep -q "3.trade-forecast_calculate.py"; then
+          echo "calculation-changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "calculation-changed=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Check if any relevant files changed
+        if echo "$CHANGED_FILES" | grep -q "1.trade-forecast_narrative.md\|2.trade-forecast_method.md\|3.trade-forecast_calculate.py"; then
+          echo "any-relevant-changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "any-relevant-changed=false" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Setup Node.js
+      if: steps.changed-files.outputs.any-relevant-changed == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      if: steps.changed-files.outputs.any-relevant-changed == 'true'
+      run: npm ci
+    
+    - name: Setup Python
+      if: steps.changed-files.outputs.calculation-changed == 'true'
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install pandoc and LaTeX
+      if: steps.changed-files.outputs.narrative-method-changed == 'true'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pandoc texlive-latex-base texlive-latex-extra texlive-latex-recommended texlive-fonts-recommended texlive-fonts-extra texlive-lang-english texlive-luatex
+    
+    - name: Generate trade forecast method PDF
+      if: steps.changed-files.outputs.narrative-method-changed == 'true'
+      working-directory: dataroom-sbr/5. Restructuring Plan Document/process
+      run: |
+        echo "Generating trade forecast method PDF..."
+        cat 1.trade-forecast_narrative.md 2.trade-forecast_method.md | pandoc --metadata-file=../../emoji.yaml --toc --pdf-engine=lualatex -o trade-forecast_method.pdf
+        echo "✅ PDF generated: trade-forecast_method.pdf"
+    
+    - name: Run trade forecast calculation
+      if: steps.changed-files.outputs.calculation-changed == 'true'
+      working-directory: dataroom-sbr/5. Restructuring Plan Document/process
+      run: |
+        echo "Running trade forecast calculation..."
+        python3 3.trade-forecast_calculate.py
+        echo "✅ Calculation completed"
+        echo "Generated files:"
+        ls -la ../output/
+    
+    - name: Setup OneDrive uploader
+      if: steps.changed-files.outputs.any-relevant-changed == 'true'
+      run: |
+        # Create a temporary script to handle OneDrive uploads for specific files
+        cat > upload-trade-forecast.js << 'EOF'
+        const fs = require('fs').promises;
+        const path = require('path');
+        const axios = require('axios');
+        
+        class OneDriveUploader {
+          constructor(clientId, clientSecret, refreshToken) {
+            this.clientId = clientId;
+            this.clientSecret = clientSecret;
+            this.refreshToken = refreshToken;
+            this.accessToken = null;
+          }
+        
+          async authenticate() {
+            try {
+              const response = await axios.post('https://login.microsoftonline.com/consumers/oauth2/v2.0/token', 
+                new URLSearchParams({
+                  client_id: this.clientId,
+                  client_secret: this.clientSecret,
+                  refresh_token: this.refreshToken,
+                  grant_type: 'refresh_token',
+                  scope: 'https://graph.microsoft.com/Files.ReadWrite'
+                }), {
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                }
+              );
+        
+              this.accessToken = response.data.access_token;
+              console.log('✅ Successfully authenticated with Microsoft Graph API');
+              
+              if (response.data.refresh_token) {
+                this.refreshToken = response.data.refresh_token;
+                console.log('🔄 Refresh token updated');
+              }
+              
+              return this.accessToken;
+            } catch (error) {
+              console.error('❌ Authentication failed:', error.response?.data || error.message);
+              throw error;
+            }
+          }
+        
+          async uploadFile(filePath, folderId, fileName) {
+            if (!this.accessToken) {
+              await this.authenticate();
+            }
+        
+            try {
+              const fileContent = await fs.readFile(filePath);
+              
+              // Determine content type based on file extension
+              const ext = path.extname(fileName).toLowerCase();
+              let contentType = 'application/octet-stream';
+              if (ext === '.pdf') {
+                contentType = 'application/pdf';
+              } else if (ext === '.csv') {
+                contentType = 'text/csv';
+              } else if (ext === '.md') {
+                contentType = 'text/markdown';
+              }
+              
+              const uploadUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}:/${fileName}:/content`;
+              
+              const response = await axios.put(uploadUrl, fileContent, {
+                headers: {
+                  'Authorization': `Bearer ${this.accessToken}`,
+                  'Content-Type': contentType
+                }
+              });
+        
+              console.log(`✅ Uploaded: ${fileName} to folder ${folderId}`);
+              return response.data;
+            } catch (error) {
+              if (error.response?.status === 401) {
+                console.log('🔄 Access token expired, re-authenticating...');
+                await this.authenticate();
+                return this.uploadFile(filePath, folderId, fileName);
+              }
+              
+              console.error(`❌ Failed to upload ${fileName}:`, error.response?.data || error.message);
+              throw error;
+            }
+          }
+        }
+        
+        async function main() {
+          try {
+            const clientId = process.env.ONEDRIVE_CLIENT_ID;
+            const clientSecret = process.env.ONEDRIVE_CLIENT_SECRET;
+            const refreshToken = process.env.ONEDRIVE_REFRESH_TOKEN;
+            
+            if (!clientId || !clientSecret || !refreshToken) {
+              throw new Error('Missing required environment variables: ONEDRIVE_CLIENT_ID, ONEDRIVE_CLIENT_SECRET, ONEDRIVE_REFRESH_TOKEN');
+            }
+        
+            console.log('🚀 Starting trade forecast OneDrive upload...');
+            
+            const uploader = new OneDriveUploader(clientId, clientSecret, refreshToken);
+            const targetFolderId = 'C8270BC5EF28019!s9dac42f8955d4bbd91fbee68430aa5ef';
+            
+            // Upload files based on what was generated
+            const filesToUpload = [];
+            
+            // Check if PDF was generated
+            if (process.env.NARRATIVE_METHOD_CHANGED === 'true') {
+              const pdfPath = 'dataroom-sbr/5. Restructuring Plan Document/process/trade-forecast_method.pdf';
+              try {
+                await fs.access(pdfPath);
+                filesToUpload.push({ path: pdfPath, name: 'trade-forecast_method.pdf' });
+              } catch (error) {
+                console.log('⚠️ PDF file not found, skipping upload');
+              }
+            }
+            
+            // Check if CSV and summary were generated
+            if (process.env.CALCULATION_CHANGED === 'true') {
+              const csvPath = 'dataroom-sbr/5. Restructuring Plan Document/output/trade-forecast.csv';
+              const summaryPath = 'dataroom-sbr/5. Restructuring Plan Document/output/trade-forecast-summary.md';
+              
+              try {
+                await fs.access(csvPath);
+                filesToUpload.push({ path: csvPath, name: 'trade-forecast.csv' });
+              } catch (error) {
+                console.log('⚠️ CSV file not found, skipping upload');
+              }
+              
+              try {
+                await fs.access(summaryPath);
+                filesToUpload.push({ path: summaryPath, name: 'trade-forecast-summary.md' });
+              } catch (error) {
+                console.log('⚠️ Summary file not found, skipping upload');
+              }
+            }
+            
+            // Upload all files
+            for (const file of filesToUpload) {
+              try {
+                await uploader.uploadFile(file.path, targetFolderId, file.name);
+              } catch (error) {
+                console.error(`❌ Failed to upload ${file.name}:`, error.message);
+              }
+            }
+            
+            console.log('🎉 Trade forecast OneDrive upload completed!');
+            
+          } catch (error) {
+            console.error('💥 Fatal error:', error.message);
+            process.exit(1);
+          }
+        }
+        
+        if (require.main === module) {
+          main();
+        }
+        EOF
+    
+    - name: Upload to OneDrive
+      if: steps.changed-files.outputs.any-relevant-changed == 'true'
+      env:
+        ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+        ONEDRIVE_CLIENT_SECRET: ${{ secrets.ONEDRIVE_CLIENT_SECRET }}
+        ONEDRIVE_REFRESH_TOKEN: ${{ secrets.ONEDRIVE_REFRESH_TOKEN }}
+        NARRATIVE_METHOD_CHANGED: ${{ steps.changed-files.outputs.narrative-method-changed }}
+        CALCULATION_CHANGED: ${{ steps.changed-files.outputs.calculation-changed }}
+      run: node upload-trade-forecast.js
+    
+    - name: Upload Summary
+      if: steps.changed-files.outputs.any-relevant-changed == 'true'
+      run: |
+        echo "## 📊 Trade Forecast Processing Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ steps.changed-files.outputs.narrative-method-changed }}" = "true" ]; then
+          echo "### 📄 PDF Generation" >> $GITHUB_STEP_SUMMARY
+          echo "- Combined narrative and method documents into PDF" >> $GITHUB_STEP_SUMMARY
+          echo "- Generated: `trade-forecast_method.pdf`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ steps.changed-files.outputs.calculation-changed }}" = "true" ]; then
+          echo "### 🐍 Python Calculation" >> $GITHUB_STEP_SUMMARY
+          echo "- Executed trade forecast calculation script" >> $GITHUB_STEP_SUMMARY
+          echo "- Generated: `trade-forecast.csv` and `trade-forecast-summary.md`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "### ☁️ OneDrive Upload" >> $GITHUB_STEP_SUMMARY
+        echo "- All generated files uploaded to OneDrive folder: `5D1B2B3BE100F93B!s4488799157b74657983917707ed2b760`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+    
+    - name: Notify if no relevant files changed
+      if: steps.changed-files.outputs.any-relevant-changed == 'false'
+      run: |
+        echo "## ℹ️ No Relevant Files Changed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "No trade forecast files were modified, so processing was skipped." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Monitored files**: " >> $GITHUB_STEP_SUMMARY
+        echo "- `1.trade-forecast_narrative.md`" >> $GITHUB_STEP_SUMMARY
+        echo "- `2.trade-forecast_method.md`" >> $GITHUB_STEP_SUMMARY
+        echo "- `3.trade-forecast_calculate.py`" >> $GITHUB_STEP_SUMMARY 
